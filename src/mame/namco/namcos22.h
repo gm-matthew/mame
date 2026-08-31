@@ -298,6 +298,7 @@ protected:
 	u16 dsp_hold_signal_r();
 	void dsp_hold_ack_w(u16 data);
 	void dsp_xf_output_w(u16 data);
+	void slave_dsp_xf_output_w(u16 data);
 	void point_address_w(u16 data);
 	void point_loword_iw(u16 data);
 	void point_hiword_w(u16 data);
@@ -464,6 +465,8 @@ protected:
 	int m_irq_state = 0;
 	int m_irq_enabled = 0;
 	namcos22_dsp_upload_state m_dsp_upload_state;
+	u16 m_dsp_upload_buffer = 0;
+	u16 m_dsp_upload_status = 0;
 	int m_UploadDestIdx = 0;
 	u32 m_cpuled_data = 0;
 	u16 m_su_82 = 0;

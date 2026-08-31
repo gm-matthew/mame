@@ -1113,7 +1113,7 @@ Notes:
 
 
 #define MCU_SPEEDUP         1     /* mcu idle skipping */
-#define SERIAL_IO_PERIOD    (100) /* lower DSP serial I/O period */
+#define SERIAL_IO_PERIOD    (2500) /* lower DSP serial I/O period */
 // actual dsp serial freq is unknown, should be much higher than 100Hz of course
 // serial comms doesn't work yet anyway
 
@@ -2255,6 +2255,11 @@ void namcos22_state::dsp_hold_ack_w(u16 data)
 
 void namcos22_state::dsp_xf_output_w(u16 data)
 {
+	slave_enable(data);
+}
+
+void namcos22_state::slave_dsp_xf_output_w(u16 data)
+{
 	/* STUB */
 }
 
@@ -2279,6 +2284,10 @@ u16 namcos22_state::dsp_unk_port3_r()
 
 void namcos22_state::upload_code_to_slave_dsp_w(u16 data)
 {
+	m_dsp_upload_buffer = data;
+	m_dsp_upload_status = 1;
+	return;
+
 	switch (m_dsp_upload_state)
 	{
 		case NAMCOS22_DSP_UPLOAD_READY:
@@ -2340,13 +2349,14 @@ u16 namcos22_state::dsp_unk8_r()
 u16 namcos22_state::custom_ic_status_r()
 {
 	/* bit 0x0001 signals completion */
+	/* data flow test 1 expects this value to be 0x0023 */
 	return 0x0063;
 }
 
 u16 namcos22_state::dsp_upload_status_r()
 {
 	/* bit 0x0001 is polled to confirm that code/data has been successfully uploaded to the slave dsp via port 0x7. */
-	return 0x0000;
+	return m_dsp_upload_status;
 }
 
 void namcos22_state::slave_serial_io_w(u16 data)
@@ -2476,13 +2486,13 @@ void namcos22_state::master_dsp_io(address_map &map)
 
 u16 namcos22_state::dsp_slave_bioz_r()
 {
-	/* STUB */
-	return 1;
+	return m_dsp_upload_status ? CLEAR_LINE : ASSERT_LINE;
 }
 
 u16 namcos22_state::dsp_slave_port3_r()
 {
-	return 0x0010; /* ? */
+	m_dsp_upload_status = 0;
+	return m_dsp_upload_buffer;
 }
 
 u16 namcos22_state::dsp_slave_port4_r()
@@ -2538,6 +2548,7 @@ void namcos22_state::slave_dsp_program(address_map &map)
 
 void namcos22_state::slave_dsp_data(address_map &map)
 {
+	map(0x5180, 0x5190).noprw();
 	map(0x8000, 0x9fff).ram().share(m_slave_extram);
 }
 
@@ -3682,6 +3693,8 @@ void namcos22_state::machine_start()
 	save_item(NAME(m_irq_state));
 	save_item(NAME(m_irq_enabled));
 	save_item(NAME(m_dsp_upload_state));
+	save_item(NAME(m_dsp_upload_buffer));
+	save_item(NAME(m_dsp_upload_status));
 	save_item(NAME(m_UploadDestIdx));
 	save_item(NAME(m_cpuled_data));
 	save_item(NAME(m_su_82));
@@ -3781,8 +3794,9 @@ void namcos22_state::namcos22(machine_config &config)
 	slave.bio_in_cb().set(FUNC(namcos22_state::dsp_slave_bioz_r));
 	slave.hold_in_cb().set(FUNC(namcos22_state::dsp_hold_signal_r));
 	slave.hold_ack_out_cb().set(FUNC(namcos22_state::dsp_hold_ack_w));
-	slave.xf_out_cb().set(FUNC(namcos22_state::dsp_xf_output_w));
+	slave.xf_out_cb().set(FUNC(namcos22_state::slave_dsp_xf_output_w));
 	slave.dx_out_cb().set(FUNC(namcos22_state::slave_serial_io_w));
+	slave.set_vblank_int("screen", FUNC(namcos22_state::dsp_vblank_irq));
 
 	NAMCO_C74(config, m_mcu, 49.152_MHz_XTAL/3); // C74 on the CPU board has no periodic interrupts, it runs entirely off Timer A0
 	m_mcu->set_addrmap(AS_PROGRAM, &namcos22_state::mcu_s22_program);
@@ -3794,6 +3808,8 @@ void namcos22_state::namcos22(machine_config &config)
 	m_iomcu->set_disable(); // not emulated yet
 
 	EEPROM_2864(config, "eeprom").write_time(attotime::zero);
+
+	config.set_maximum_quantum(attotime::from_hz(80000));
 
 	// video hardware
 	SCREEN(config, m_screen);
@@ -3846,6 +3862,7 @@ void namcos22s_state::namcos22s(machine_config &config)
 	m_mcu->an3_cb().set(FUNC(namcos22s_state::mcu_adc_r<3>));
 	TIMER(config, "mcu_irq").configure_scanline(FUNC(namcos22s_state::mcu_irq), "screen", 0, 240);
 	config.set_maximum_quantum(attotime::from_hz(9000)); // erratic inputs otherwise, probably mcu vs maincpu shareram
+	config.set_maximum_quantum(attotime::from_hz(80000));
 
 	config.device_remove("iomcu");
 
